@@ -64,10 +64,11 @@ class ALOCC_Model(object):
     self.dfc_dim = dfc_dim
 
     # batch normalization : deals with poor initialization helps gradient flow
+    self.d_bn0 = batch_norm(name='d_bn0')
     self.d_bn1 = batch_norm(name='d_bn1')
     self.d_bn2 = batch_norm(name='d_bn2')
     self.d_bn3 = batch_norm(name='d_bn3')
-    self.d_bn4 = batch_norm(name='d_bn4')
+
     self.g_bn0 = batch_norm(name='g_bn0')
     self.g_bn1 = batch_norm(name='g_bn1')
     self.g_bn2 = batch_norm(name='g_bn2')
@@ -75,6 +76,7 @@ class ALOCC_Model(object):
     self.g_bn4 = batch_norm(name='g_bn4')
     self.g_bn5 = batch_norm(name='g_bn5')
     self.g_bn6 = batch_norm(name='g_bn6')
+    self.g_bn7 = batch_norm(name='g_bn7')
 
     self.dataset_name = dataset_name
     self.dataset_address= dataset_address
@@ -113,6 +115,7 @@ class ALOCC_Model(object):
 
   # =========================================================================================================
   def build_model(self):
+    
     image_dims = [self.input_height, self.input_width, self.c_dim]
 
     self.inputs = tf.placeholder(tf.float32, [self.batch_size] + image_dims, name='real_images')
@@ -121,34 +124,42 @@ class ALOCC_Model(object):
     inputs = self.inputs
     sample_inputs = self.sample_inputs
 
+    # tesorboard setting
+    # self.z_sum = histogram_summary("z", self.z)
+    # self.d_sum = histogram_summary("d", self.D)
+    # self.d__sum = histogram_summary("d_", self.D_)
+    # self.G_sum = image_summary("G", self.G)
+
+    # The error function added to the image
     self.z = tf.placeholder(tf.float32,[self.batch_size] + image_dims, name='z')
 
+    # Generate the Images
     self.G = self.generator(self.z)
+
+    # Use the Discriminator to discriminate for the generator's image and the input image
+    self.D_, self.D_logits_ = self.discriminator(self.G, reuse=True) 
     self.D, self.D_logits = self.discriminator(inputs)
 
     self.sampler = self.sampler(self.z)
-    self.D_, self.D_logits_ = self.discriminator(self.G, reuse=True)
-
-    # tesorboard setting
-    # self.z_sum = histogram_summary("z", self.z)
-    #self.d_sum = histogram_summary("d", self.D)
-    #self.d__sum = histogram_summary("d_", self.D_)
-    #self.G_sum = image_summary("G", self.G)
 
     # Simple GAN's losses
     self.d_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.D_logits, labels=tf.ones_like(self.D)))
     self.d_loss_fake = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.D_logits_, labels=tf.zeros_like(self.D_)))
+
+    # Non Saturating Heuristic
     self.g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.D_logits_, labels=tf.ones_like(self.D_)))
 
     # Refinement loss
     self.g_r_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.G,labels=self.z))
+    
+    # Final Loss
     self.g_loss  = self.g_loss + self.g_r_loss * self.r_alpha
     self.d_loss = self.d_loss_real + self.d_loss_fake
 
-    self.d_loss_real_sum = scalar_summary("d_loss_real", self.d_loss_real)
-    self.d_loss_fake_sum = scalar_summary("d_loss_fake", self.d_loss_fake)
-    self.g_loss_sum = scalar_summary("g_loss", self.g_loss)
-    self.d_loss_sum = scalar_summary("d_loss", self.d_loss)
+    self.d_loss_real_sum = tf.scalar_summary("d_loss_real", self.d_loss_real)
+    self.d_loss_fake_sum = tf.scalar_summary("d_loss_fake", self.d_loss_fake)
+    self.g_loss_sum = tf.scalar_summary("g_loss", self.g_loss)
+    self.d_loss_sum = tf.scalar_summary("d_loss", self.d_loss)
 
     t_vars = tf.trainable_variables()
 
@@ -158,14 +169,11 @@ class ALOCC_Model(object):
 
 # =========================================================================================================
   def train(self, config):
+
     d_optim = tf.train.RMSPropOptimizer(config.learning_rate).minimize(self.d_loss, var_list=self.d_vars)
     g_optim = tf.train.RMSPropOptimizer(config.learning_rate).minimize(self.g_loss, var_list=self.g_vars)
 
-    try:
-      tf.global_variables_initializer().run()
-    except:
-      tf.initialize_all_variables().run()
-
+    tf.global_variables_initializer().run()
 
     self.saver = tf.train.Saver()
 
@@ -328,46 +336,71 @@ class ALOCC_Model(object):
       self.save(config.checkpoint_dir, epoch)
 
   # =========================================================================================================
-  def discriminator(self, image,reuse=False):
+  def discriminator(self, image, reuse=False):
+
     with tf.variable_scope("discriminator") as scope:
+
       if reuse:
         scope.reuse_variables()
 
+      # df_dim = 16 (data frame dimension)
+      h0 = lrelu( self.d_bn0(conv2d(image, self.df_dim*4, name='d_h0_conv')) )
+      assert( h0.get_shape()[-1] == 64 )
 
-      h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
-      h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim*2, name='d_h1_conv')))
-      h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim*4, name='d_h2_conv')))
-      h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim*8, name='d_h3_conv')))
+      h1 = lrelu( self.d_bn1(conv2d(h0, self.df_dim*8, name='d_h1_conv')) )
+      assert( h1.get_shape()[-1] == 128 )
+
+      h2 = lrelu( self.d_bn2(conv2d(h1, self.df_dim*16, name='d_h2_conv')) )
+      assert( h2.get_shape()[-1] == 256 )
+
+      h3 = lrelu( self.d_bn3(conv2d(h2, self.df_dim*32, name='d_h3_conv')) )
+      assert( h3.get_shape()[-1] == 512 )
+
       h4 = linear(tf.reshape(h3, [self.batch_size, -1]), 1, 'd_h3_lin')
+
       h5 = tf.nn.sigmoid(h4,name='d_output')
+
       return h5, h4
 
   # =========================================================================================================
   def generator(self, z):
+
+    ''' Convolution Auto-Encoder Decoder '''
+
     with tf.variable_scope("generator") as scope:
 
-      s_h, s_w = self.output_height, self.output_width
-      s_h2, s_w2 = conv_out_size_same(s_h, 2), conv_out_size_same(s_w, 2)
-      s_h4, s_w4 = conv_out_size_same(s_h2, 2), conv_out_size_same(s_w2, 2)
-      s_h8, s_w8 = conv_out_size_same(s_h4, 2), conv_out_size_same(s_w4, 2)
-      s_h16, s_w16 = conv_out_size_same(s_h8, 2), conv_out_size_same(s_w8, 2)
+      # Encoder-Architecture
+      # df_dim = 16 (data frame dimension)
+      encoder_0 = lrelu(self.g_bn0(conv2d(z, self.df_dim * 4, name='g_encoder_h0_conv')))
+      assert(encoder_0.get_shape()[-1] == 64)
 
-      hae0 = lrelu(self.g_bn4(conv2d(z   , self.df_dim * 2, name='g_encoder_h0_conv')))
-      hae1 = lrelu(self.g_bn5(conv2d(hae0, self.df_dim * 4, name='g_encoder_h1_conv')))
-      hae2 = lrelu(self.g_bn6(conv2d(hae1, self.df_dim * 8, name='g_encoder_h2_conv')))
+      encoder_1 = lrelu(self.g_bn1(conv2d(encoder_0, self.df_dim * 8, name='g_encoder_h1_conv')))
+      assert(encoder_1.get_shape()[-1] == 128)
 
-      h2, self.h2_w, self.h2_b = deconv2d(
-        hae2, [self.batch_size, s_h4, s_w4, self.gf_dim*2], name='g_decoder_h1', with_w=True)
-      h2 = tf.nn.relu(self.g_bn2(h2))
+      encoder_2 = lrelu(self.g_bn2(conv2d(encoder_1, self.df_dim * 16, name='g_encoder_h2_conv')))
+      assert(encoder_2.get_shape()[-1] == 256)
 
-      h3, self.h3_w, self.h3_b = deconv2d(
-          h2, [self.batch_size, s_h2, s_w2, self.gf_dim*1], name='g_decoder_h0', with_w=True)
-      h3 = tf.nn.relu(self.g_bn3(h3))
+      # Middle Portion
+      encoder_3 = lrelu(self.g_bn3(conv2d(encoder_2, self.df_dim * 32, name='g_encoder_h3_conv',padding = 'SAME')))
+      assert(encoder_3.get_shape()[-1] == 512)
 
-      h4, self.h4_w, self.h4_b = deconv2d(
-          h3, [self.batch_size, s_h, s_w, self.c_dim], name='g_decoder_h00', with_w=True)
+      # Decoder-Architecture
+      decoder_3 = lrelu(deconv2d( encoder_3, output_shape = encoder_2.get_shape(), name = 'g_decoder_h3_deconv'))
+      assert(decoder_3.get_shape()[-1] == 256)
 
-      return tf.nn.tanh(h4,name='g_output')
+      decoder_2 = lrelu(deconv2d( decoder_3, output_shape = encoder_1.get_shape(), name = 'g_decoder_h2_deconv'))
+      assert(decoder_2.get_shape()[-1] == 128)
+
+      decoder_1 = lrelu(deconv2d( decoder_2, output_shape = encoder_0.get_shape(), name = 'g_decoder_h1_deconv'))
+      assert(decoder_1.get_shape()[-1] = 64)
+
+      decoder_0 = deconv2d( decoder_1, output_shape = z.get_shape(), name = 'g_decoder_h0_deconv')
+      assert(decoder_0.get_shape()[-1] = 1)
+
+      # PLLLLLLLLLLLLLLLLLLLLLEASEEEEEEEEEEEEEEEEEEEEEEEEEEEEE CHECKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK
+      # return tf.nn.tanh(decoder_0,name='g_output')
+      
+      return decoder_0
 
   # =========================================================================================================
   def sampler(self, z, y=None):
