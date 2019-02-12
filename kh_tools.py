@@ -54,6 +54,12 @@ def read_lst_images_w_noise2(lst_images_path,nd_patch_size, n_patch_step):
         lst_images.append(read_image_w_noise(image_path))
     return np.array(lst_images)
 
+def read_lst_images_without_noise2(lst_images_path,nd_patch_size, n_patch_step):
+    lst_images = []
+    for image_path in lst_images_path:
+        lst_images.append(read_image(image_path))
+    return np.array(lst_images)
+
 def read_lst_images_w_noise(lst_images_path,nd_patch_size, n_patch_step):
     lst_slices = []
     lst_location = []
@@ -458,4 +464,3 @@ def kh_getImages(sBaseImageFiles='',bGetSlice=True,ndSliceSize=(10,10),nStride=1
                           nStride=nStride,
                           bSaveImages=bSaveImages)
     return ('','')
-

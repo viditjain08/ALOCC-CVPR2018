@@ -18,23 +18,23 @@ class ALOCC_Model(object):
                n_fetch_data=10, n_per_itr_print_results=500):
     """
     This is the main class of our Adversarially Learned One-Class Classifier for Novelty Detection
-    :param sess: TensorFlow session      
+    :param sess: TensorFlow session
     :param batch_size: The size of batch. Should be specified before training. [128]
     :param attention_label: Conditioned label that growth attention of training label [1]
-    :param r_alpha: Refinement parameter [0.2]        
-    :param z_dim:  (optional) Dimension of dim for Z. [100] 
-    :param gf_dim: (optional) Dimension of gen filters in first conv layer. [64] 
-    :param df_dim: (optional) Dimension of discrim filters in first conv layer. [64] 
-    :param gfc_dim: (optional) Dimension of gen units for for fully connected layer. [1024] 
-    :param dfc_dim: (optional) Dimension of discrim units for fully connected layer. [1024] 
-    :param c_dim: (optional) Dimension of image color. For grayscale input, set to 1. [3]  
+    :param r_alpha: Refinement parameter [0.2]
+    :param z_dim:  (optional) Dimension of dim for Z. [100]
+    :param gf_dim: (optional) Dimension of gen filters in first conv layer. [64]
+    :param df_dim: (optional) Dimension of discrim filters in first conv layer. [64]
+    :param gfc_dim: (optional) Dimension of gen units for for fully connected layer. [1024]
+    :param dfc_dim: (optional) Dimension of discrim units for fully connected layer. [1024]
+    :param c_dim: (optional) Dimension of image color. For grayscale input, set to 1. [3]
     :param sample_dir: Directory address which save some samples [.]
     :param kb_work_on_patch: Boolean value for working on PatchBased System or not [True]
-    :param nd_input_frame_size:  Input frame size 
+    :param nd_input_frame_size:  Input frame size
     :param nd_patch_size:  Input patch size
     :param n_stride: PatchBased data preprocessing stride
-    :param n_fetch_data: Fetch size of Data 
-    :param n_per_itr_print_results: # of printed iteration   
+    :param n_fetch_data: Fetch size of Data
+    :param n_per_itr_print_results: # of printed iteration
     """
 
     self.n_per_itr_print_results=n_per_itr_print_results
@@ -279,7 +279,7 @@ class ALOCC_Model(object):
           _, summary_str = self.sess.run([g_optim, self.g_sum],
                                           feed_dict={ self.z: batch_noise_images })
           self.writer.add_summary(summary_str, counter)
-          
+
           errD_fake = self.d_loss_fake.eval({ self.z: batch_noise_images })
           errD_real = self.d_loss_real.eval({ self.inputs: batch_images })
           errG = self.g_loss.eval({self.z: batch_noise_images})
@@ -502,20 +502,19 @@ class ALOCC_Model(object):
     lst_generated_img= []
     lst_discriminator_v = []
     tmp_shape = lst_image_slices.shape
+
     if self.dataset_name=='UCSD':
       tmp_lst_slices = lst_image_slices.reshape(-1, tmp_shape[2], tmp_shape[3], 1)
     else:
       tmp_lst_slices = lst_image_slices
     batch_idxs = len(tmp_lst_slices) // self.batch_size
-
     print('start new process ...')
     for i in xrange(0, batch_idxs):
         batch_data = tmp_lst_slices[i * self.batch_size:(i + 1) * self.batch_size]
 
         results_g = self.sess.run(self.G, feed_dict={self.z: batch_data})
-        results_d = self.sess.run(self.D_logits, feed_dict={self.inputs: batch_data})
+        results_d = self.sess.run(self.D, feed_dict={self.inputs: batch_data})
         #results = self.sess.run(self.sampler, feed_dict={self.z: batch_data})
-
         # to log some images with d values
         #for idx,image in enumerate(results_g):
         #  scipy.misc.imsave('samples/{}_{}.jpg'.format(idx,results_d[idx][0]),batch_data[idx,:,:,0])
@@ -523,10 +522,10 @@ class ALOCC_Model(object):
         lst_discriminator_v.extend(results_d)
         lst_generated_img.extend(results_g)
         print('finish pp ... {}/{}'.format(i,batch_idxs))
-
     #f = plt.figure()
     #plt.plot(np.array(lst_discriminator_v))
     #f.savefig('samples/d_values.jpg')
 
     scipy.misc.imsave('./'+self.sample_dir+'/ALOCC_generated.jpg', montage(np.array(lst_generated_img)[:,:,:,0]))
     scipy.misc.imsave('./'+self.sample_dir+'/ALOCC_input.jpg', montage(np.array(tmp_lst_slices)[:,:,:,0]))
+    return lst_discriminator_v

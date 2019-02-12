@@ -16,7 +16,7 @@ flags.DEFINE_float("learning_rate", 0, "Learning rate of for adam [0.0002]")
 flags.DEFINE_float("beta1", 0.5, "Momentum term of adam [0.5]")
 flags.DEFINE_integer("attention_label", 1, "Conditioned label that growth attention of training label [1]")
 flags.DEFINE_float("r_alpha", 0.2, "Refinement parameter [0.2]")
-flags.DEFINE_integer("train_size", np.inf, "The size of train images [np.inf]")
+flags.DEFINE_float("train_size", np.inf, "The size of train images [np.inf]")
 flags.DEFINE_integer("batch_size", 128, "The size of batch images [64]")
 flags.DEFINE_integer("input_height", 45, "The size of image to use. [45]")
 flags.DEFINE_integer("input_width", None, "The size of image to use. If None, same value as input_height [None]")
@@ -51,11 +51,12 @@ def main(_):
     pp.pprint(flags.FLAGS.__flags)
 
     n_per_itr_print_results = 100
-    n_fetch_data = 10
+    n_fetch_data = 180
     kb_work_on_patch= False
     nd_input_frame_size = (240, 360)
     #nd_patch_size = (45, 45)
     n_stride = 10
+    nd_patch_step=(n_stride,n_stride)
     #FLAGS.checkpoint_dir = "./checkpoint/UCSD_128_45_45/"
 
     #FLAGS.dataset = 'UCSD'
@@ -78,7 +79,7 @@ def main(_):
     check_some_assertions()
 
     nd_patch_size = (FLAGS.input_width, FLAGS.input_height)
-    FLAGS.nStride = n_stride
+    # FLAGS.nStride = n_stride
 
     #FLAGS.input_fname_pattern = '*'
     FLAGS.train = False
@@ -138,38 +139,49 @@ def main(_):
             #generated_data = tmp_ALOCC_model.feed2generator(data[0:FLAGS.batch_size])
 
         # else in UCDS (depends on infrustructure)
+        tmp_lst_image_paths = []
         for s_image_dirs in sorted(glob(os.path.join(FLAGS.dataset_address, 'Test[0-9][0-9][0-9]'))):
-            tmp_lst_image_paths = []
+
             if os.path.basename(s_image_dirs) not in ['Test004']:
                print('Skip ',os.path.basename(s_image_dirs))
                continue
             for s_image_dir_files in sorted(glob(os.path.join(s_image_dirs + '/*'))):
                 if os.path.basename(s_image_dir_files) not in ['068.tif']:
-                    print('Skip ', os.path.basename(s_image_dir_files))
+                    print('Skip ', os.path.basename(s_image_dirs), os.path.basename(s_image_dir_files))
                     continue
                 tmp_lst_image_paths.append(s_image_dir_files)
 
 
-            #random
-            #lst_image_paths = [tmp_lst_image_paths[x] for x in random.sample(range(0, len(tmp_lst_image_paths)), n_fetch_data)]
-            lst_image_paths = tmp_lst_image_paths
-            #images =read_lst_images(lst_image_paths,nd_patch_size,nd_patch_step,b_work_on_patch=False)
-            images = read_lst_images_w_noise2(lst_image_paths, nd_patch_size, nd_patch_step)
+        #random
+        #lst_image_paths = [tmp_lst_image_paths[x] for x in random.sample(range(0, len(tmp_lst_image_paths)), n_fetch_data)]
+        lst_image_paths = tmp_lst_image_paths
 
-            lst_prob = process_frame(os.path.basename(s_image_dirs),images,tmp_ALOCC_model)
+        #images =read_lst_images(lst_image_paths,nd_patch_size,nd_patch_step,b_work_on_patch=False)
+        images = read_lst_images_w_noise2(lst_image_paths, nd_patch_size, nd_patch_step)
 
-            print('pseudocode test is finished')
+        lst_prob = process_frame(os.path.basename(s_image_dirs),images,tmp_ALOCC_model)
+
+        print('pseudocode test is finished')
 
             # This code for just check output for readers
             # ...
 
 def process_frame(s_name,frames_src,sess):
     nd_patch,nd_location = get_image_patches(frames_src,sess.patch_size,sess.patch_step)
+
     frame_patches = nd_patch.transpose([1,0,2,3])
-    print('frame patches :{}\npatches size:{}'.format(len(frame_patches),(frame_patches.shape[1],frame_patches.shape[2])))
+    print('frame patches :{}\npatches size:{}'.format(len(frame_patches[0]),(frame_patches.shape[2],frame_patches.shape[3])))
 
     lst_prob = sess.f_test_frozen_model(frame_patches)
-
+    lst_prob = np.array(lst_prob).reshape((-1))
+    print(lst_prob)
+    count=0
+    lst_anomaly=[]
+    for i in nd_location:
+        if lst_prob[count]<1e-10:
+            lst_anomaly.append(i)
+        count+=1
+    print(lst_anomaly)
     #  This code for just check output for readers
     # ...
 
@@ -177,5 +189,3 @@ def process_frame(s_name,frames_src,sess):
 # ---------------------------------------------------------------------------------------
 if __name__ == '__main__':
     tf.app.run()
-
-
