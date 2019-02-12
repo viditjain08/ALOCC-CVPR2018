@@ -115,7 +115,7 @@ class ALOCC_Model(object):
 
   # =========================================================================================================
   def build_model(self):
-    
+
     image_dims = [self.input_height, self.input_width, self.c_dim]
 
     self.inputs = tf.placeholder(tf.float32, [self.batch_size] + image_dims, name='real_images')
@@ -137,10 +137,11 @@ class ALOCC_Model(object):
     self.G = self.generator(self.z)
 
     # Use the Discriminator to discriminate for the generator's image and the input image
-    self.D_, self.D_logits_ = self.discriminator(self.G, reuse=True) 
-    self.D, self.D_logits = self.discriminator(inputs)
 
-    self.sampler = self.sampler(self.z)
+    self.D, self.D_logits = self.discriminator(inputs)
+    self.D_, self.D_logits_ = self.discriminator(self.G, reuse=True)
+
+    self.sampler = self.generator(self.z,reuse=True)
 
     # Simple GAN's losses
     self.d_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.D_logits, labels=tf.ones_like(self.D)))
@@ -150,16 +151,16 @@ class ALOCC_Model(object):
     self.g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.D_logits_, labels=tf.ones_like(self.D_)))
 
     # Refinement loss
-    self.g_r_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.G,labels=self.z))
-    
+    self.g_r_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.G,labels=inputs))
+
     # Final Loss
     self.g_loss  = self.g_loss + self.g_r_loss * self.r_alpha
     self.d_loss = self.d_loss_real + self.d_loss_fake
 
-    self.d_loss_real_sum = tf.scalar_summary("d_loss_real", self.d_loss_real)
-    self.d_loss_fake_sum = tf.scalar_summary("d_loss_fake", self.d_loss_fake)
-    self.g_loss_sum = tf.scalar_summary("g_loss", self.g_loss)
-    self.d_loss_sum = tf.scalar_summary("d_loss", self.d_loss)
+    self.d_loss_real_sum = tf.summary.scalar("d_loss_real", self.d_loss_real)
+    self.d_loss_fake_sum = tf.summary.scalar("d_loss_fake", self.d_loss_fake)
+    self.g_loss_sum = tf.summary.scalar("g_loss", self.g_loss)
+    self.d_loss_sum = tf.summary.scalar("d_loss", self.d_loss)
 
     t_vars = tf.trainable_variables()
 
@@ -170,8 +171,8 @@ class ALOCC_Model(object):
 # =========================================================================================================
   def train(self, config):
 
-    d_optim = tf.train.RMSPropOptimizer(config.learning_rate).minimize(self.d_loss, var_list=self.d_vars)
-    g_optim = tf.train.RMSPropOptimizer(config.learning_rate).minimize(self.g_loss, var_list=self.g_vars)
+    d_optim = tf.train.AdamOptimizer(config.learning_rate).minimize(self.d_loss, var_list=self.d_vars)
+    g_optim = tf.train.AdamOptimizer(config.learning_rate).minimize(self.g_loss, var_list=self.g_vars)
 
     tf.global_variables_initializer().run()
 
@@ -201,14 +202,14 @@ class ALOCC_Model(object):
     sample_inputs = np.array(sample).astype(np.float32)
     scipy.misc.imsave('./{}/train_input_samples.jpg'.format(config.sample_dir), montage(sample_inputs[:,:,:,0]))
 
-    # load previous checkpoint
-    counter = 1
-    could_load, checkpoint_counter = self.load(self.checkpoint_dir)
-    if could_load:
-      counter = checkpoint_counter
-      print(" [*] Load SUCCESS")
-    else:
-      print(" [!] Load failed...")
+    # # load previous checkpoint
+    # counter = 1
+    # could_load, checkpoint_counter = self.load(self.checkpoint_dir)
+    # if could_load:
+    #   counter = checkpoint_counter
+    #   print(" [*] Load SUCCESS")
+    # else:
+    #   print(" [!] Load failed...")
 
 
     # load traning data
@@ -363,43 +364,48 @@ class ALOCC_Model(object):
       return h5, h4
 
   # =========================================================================================================
-  def generator(self, z):
+  def generator(self, z,reuse=None):
 
     ''' Convolution Auto-Encoder Decoder '''
 
-    with tf.variable_scope("generator") as scope:
+    with tf.variable_scope("generator",reuse=reuse) as scope:
 
       # Encoder-Architecture
       # df_dim = 16 (data frame dimension)
-      encoder_0 = lrelu(self.g_bn0(conv2d(z, self.df_dim * 4, name='g_encoder_h0_conv')))
+      encoder_0 = lrelu(self.g_bn0(conv2d(z, self.gf_dim * 4, name='g_encoder_h0_conv')))
       assert(encoder_0.get_shape()[-1] == 64)
 
-      encoder_1 = lrelu(self.g_bn1(conv2d(encoder_0, self.df_dim * 8, name='g_encoder_h1_conv')))
+      encoder_1 = lrelu(self.g_bn1(conv2d(encoder_0, self.gf_dim * 8, name='g_encoder_h1_conv')))
       assert(encoder_1.get_shape()[-1] == 128)
 
-      encoder_2 = lrelu(self.g_bn2(conv2d(encoder_1, self.df_dim * 16, name='g_encoder_h2_conv')))
+      encoder_2 = lrelu(self.g_bn2(conv2d(encoder_1, self.gf_dim * 16, name='g_encoder_h2_conv')))
       assert(encoder_2.get_shape()[-1] == 256)
 
       # Middle Portion
-      encoder_3 = lrelu(self.g_bn3(conv2d(encoder_2, self.df_dim * 32, name='g_encoder_h3_conv',padding = 'SAME')))
+      encoder_3 = lrelu(self.g_bn3(conv2d(encoder_2, self.gf_dim * 32, name='g_encoder_h3_conv',padding = 'SAME')))
       assert(encoder_3.get_shape()[-1] == 512)
 
+      print(encoder_3)
       # Decoder-Architecture
-      decoder_3 = lrelu(deconv2d( encoder_3, output_shape = encoder_2.get_shape(), name = 'g_decoder_h3_deconv'))
+      decoder_3 = lrelu(deconv2d( encoder_3, output_shape = encoder_2.get_shape(), name = 'g_decoder_h3_deconv',padding='SAME'))
       assert(decoder_3.get_shape()[-1] == 256)
+      print(decoder_3)
 
       decoder_2 = lrelu(deconv2d( decoder_3, output_shape = encoder_1.get_shape(), name = 'g_decoder_h2_deconv'))
       assert(decoder_2.get_shape()[-1] == 128)
+      print(decoder_2)
 
       decoder_1 = lrelu(deconv2d( decoder_2, output_shape = encoder_0.get_shape(), name = 'g_decoder_h1_deconv'))
-      assert(decoder_1.get_shape()[-1] = 64)
+      assert(decoder_1.get_shape()[-1] == 64)
+      print(decoder_1)
 
       decoder_0 = deconv2d( decoder_1, output_shape = z.get_shape(), name = 'g_decoder_h0_deconv')
-      assert(decoder_0.get_shape()[-1] = 1)
+      assert(decoder_0.get_shape()[-1] == 1)
+      print(decoder_0)
 
       # PLLLLLLLLLLLLLLLLLLLLLEASEEEEEEEEEEEEEEEEEEEEEEEEEEEEE CHECKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK
       # return tf.nn.tanh(decoder_0,name='g_output')
-      
+
       return decoder_0
 
   # =========================================================================================================
