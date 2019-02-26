@@ -17,7 +17,7 @@ flags.DEFINE_float("beta1", 0.5, "Momentum term of adam [0.5]")
 flags.DEFINE_integer("attention_label", 1, "Conditioned label that growth attention of training label [1]")
 flags.DEFINE_float("r_alpha", 0.2, "Refinement parameter [0.2]")
 flags.DEFINE_float("train_size", np.inf, "The size of train images [np.inf]")
-flags.DEFINE_integer("batch_size", 128, "The size of batch images [64]")
+flags.DEFINE_integer("batch_size", 96, "The size of batch images [64]")
 flags.DEFINE_integer("input_height", 45, "The size of image to use. [45]")
 flags.DEFINE_integer("input_width", None, "The size of image to use. If None, same value as input_height [None]")
 flags.DEFINE_integer("output_height", 45, "The size of the output images to produce [45]")
@@ -25,7 +25,7 @@ flags.DEFINE_integer("output_width", None, "The size of the output images to pro
 flags.DEFINE_string("dataset", "UCSD", "The name of dataset [UCSD, mnist]")
 flags.DEFINE_string("dataset_address", "./dataset/UCSD_Anomaly_Dataset.v1p2/UCSDped2/Test", "The path of dataset")
 flags.DEFINE_string("input_fname_pattern", "*", "Glob pattern of filename of input images [*]")
-flags.DEFINE_string("checkpoint_dir", "./checkpoint/UCSD_128_45_45/", "Directory name to save the checkpoints [checkpoint]")
+flags.DEFINE_string("checkpoint_dir", "./checkpoint/UCSD_96_45_45/", "Directory name to save the checkpoints [checkpoint]")
 flags.DEFINE_string("log_dir", "log", "Directory name to save the log [log]")
 flags.DEFINE_string("sample_dir", "samples", "Directory name to save the image samples [samples]")
 flags.DEFINE_boolean("train", False, "True for training, False for testing [False]")
@@ -84,7 +84,7 @@ def main(_):
     #FLAGS.input_fname_pattern = '*'
     FLAGS.train = False
     FLAGS.epoch = 1
-    FLAGS.batch_size = 504
+    FLAGS.batch_size = 1
 
 
     gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.1)
@@ -140,9 +140,9 @@ def main(_):
 
         # else in UCDS (depends on infrustructure)
         tmp_lst_image_paths = []
-        for s_image_dirs in sorted(glob(os.path.join(FLAGS.dataset_address, 'Test[0-9][0-9][0-9]'))):
+        for s_image_dirs in sorted(glob(os.path.join(FLAGS.dataset_address, 'Train[0-9][0-9][0-9]'))):
 
-            if os.path.basename(s_image_dirs) not in ['Test004']:
+            if os.path.basename(s_image_dirs) not in ['Train004']:
                print('Skip ',os.path.basename(s_image_dirs))
                continue
             for s_image_dir_files in sorted(glob(os.path.join(s_image_dirs + '/*'))):
@@ -157,17 +157,20 @@ def main(_):
         lst_image_paths = tmp_lst_image_paths
 
         #images =read_lst_images(lst_image_paths,nd_patch_size,nd_patch_step,b_work_on_patch=False)
-        images = read_lst_images_w_noise2(lst_image_paths, nd_patch_size, nd_patch_step)
+        images = read_lst_images_without_noise2(lst_image_paths, nd_patch_size, nd_patch_step)
 
-        lst_prob = process_frame(os.path.basename(s_image_dirs),images,tmp_ALOCC_model)
+
+        lst_prob = process_frame(images,tmp_ALOCC_model)
 
         print('pseudocode test is finished')
 
             # This code for just check output for readers
             # ...
 
-def process_frame(s_name,frames_src,sess):
+def process_frame(frames_src,sess):
     nd_patch,nd_location = get_image_patches(frames_src,sess.patch_size,sess.patch_step)
+
+    print(np.array(nd_patch).shape)
 
     frame_patches = nd_patch.transpose([1,0,2,3])
     print('frame patches :{}\npatches size:{}'.format(len(frame_patches[0]),(frame_patches.shape[2],frame_patches.shape[3])))

@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 class ALOCC_Model(object):
   def __init__(self, sess,
                input_height=45,input_width=45, output_height=64, output_width=64,
-               batch_size=128, sample_num = 128, attention_label=1, is_training=True,
+               batch_size=64, sample_num = 64, attention_label=1, is_training=True,
                z_dim=100, gf_dim=16, df_dim=16, gfc_dim=512, dfc_dim=512, c_dim=3,
                dataset_name=None, dataset_address=None, input_fname_pattern=None,
                checkpoint_dir=None, log_dir=None, sample_dir=None, r_alpha = 0.2,
@@ -171,8 +171,24 @@ class ALOCC_Model(object):
 # =========================================================================================================
   def train(self, config):
 
-    d_optim = tf.train.AdamOptimizer(config.learning_rate).minimize(self.d_loss, var_list=self.d_vars)
-    g_optim = tf.train.AdamOptimizer(config.learning_rate).minimize(self.g_loss, var_list=self.g_vars)
+    d_grads = tf.train.RMSPropOptimizer(config.learning_rate).compute_gradients(self.d_loss, var_list=self.d_vars)
+    g_grads = tf.train.RMSPropOptimizer(config.learning_rate).compute_gradients(self.g_loss, var_list=self.g_vars)
+
+    d_optim = tf.train.RMSPropOptimizer(config.learning_rate).apply_gradients(d_grads)
+    g_optim = tf.train.RMSPropOptimizer(config.learning_rate).apply_gradients(g_grads)
+
+    d_grads_scalar = []
+    g_grads_scalar = []
+    for grad, var in d_grads:
+        d_grads_scalar.append(tf.summary.histogram(var.name + '/d_gradient', grad))
+    for grad, var in g_grads:
+        g_grads_scalar.append(tf.summary.histogram(var.name + '/g_gradient', grad))
+    # Merge all summaries into a single op
+
+    print(d_grads_scalar)
+    print(g_grads_scalar)
+    self.d_grads = merge_summary(d_grads_scalar)
+    self.g_grads = merge_summary(g_grads_scalar)
 
     tf.global_variables_initializer().run()
 
@@ -203,13 +219,13 @@ class ALOCC_Model(object):
     scipy.misc.imsave('./{}/train_input_samples.jpg'.format(config.sample_dir), montage(sample_inputs[:,:,:,0]))
 
     # # load previous checkpoint
-    # counter = 1
-    # could_load, checkpoint_counter = self.load(self.checkpoint_dir)
-    # if could_load:
-    #   counter = checkpoint_counter
-    #   print(" [*] Load SUCCESS")
-    # else:
-    #   print(" [!] Load failed...")
+    counter = 1
+    could_load, checkpoint_counter = self.load(self.checkpoint_dir)
+    if could_load:
+      counter = checkpoint_counter
+      print(" [*] Load SUCCESS")
+    else:
+      print(" [!] Load failed...")
 
 
     # load traning data
@@ -222,6 +238,9 @@ class ALOCC_Model(object):
       sample_w_noise,_ = read_lst_images_w_noise(sample_files, self.patch_size, self.patch_step)
       sample_w_noise = np.array(sample_w_noise).reshape(-1, self.patch_size[0], self.patch_size[1], 1)
 
+      print(sample.shape)
+      print(sample_w_noise.shape)
+
     for epoch in xrange(config.epoch):
       print('Epoch ({}/{})-------------------------------------------------'.format(epoch,config.epoch))
       if config.dataset == 'mnist':
@@ -231,7 +250,7 @@ class ALOCC_Model(object):
 
       # for detecting valuable epoch that we must stop training step
       # sample_input_for_test_each_train_step.npy
-      sample_test = np.load('SIFTETS.npy').reshape([504,45,45,1])[0:128]
+      sample_test = np.load('SIFTETS.npy').reshape([504,45,45,1])[0:64]
 
       for idx in xrange(0, batch_idxs):
         if config.dataset == 'mnist':
@@ -248,46 +267,67 @@ class ALOCC_Model(object):
 
         if config.dataset == 'mnist':
           # Update D network
-          _, summary_str = self.sess.run([d_optim, self.d_sum],
+          _, summary_str,grads = self.sess.run([d_optim, self.d_sum,self.d_grads],
                                          feed_dict={self.inputs: batch_images, self.z: batch_noise_images})
           self.writer.add_summary(summary_str, counter)
+          self.writer.add_summary(grads, counter)
 
           # Update G network
-          _, summary_str = self.sess.run([g_optim, self.g_sum],
+          _, summary_str,grads = self.sess.run([g_optim, self.g_sum,self.g_grads],
                                          feed_dict={self.z: batch_noise_images})
           self.writer.add_summary(summary_str, counter)
+          self.writer.add_summary(grads, counter)
 
           # Run g_optim twice to make sure that d_loss does not go to zero (different from paper)
-          _, summary_str = self.sess.run([g_optim, self.g_sum],
+          _, summary_str,grads = self.sess.run([g_optim, self.g_sum, self.g_grads],
                                          feed_dict={self.z: batch_noise_images})
           self.writer.add_summary(summary_str, counter)
+          self.writer.add_summary(grads, counter)
+
 
           errD_fake = self.d_loss_fake.eval({self.z: batch_noise_images})
           errD_real = self.d_loss_real.eval({self.inputs: batch_images})
           errG = self.g_loss.eval({self.z: batch_noise_images})
         else:
           # update discriminator
-          _, summary_str = self.sess.run([d_optim, self.d_sum],
-                                          feed_dict={ self.inputs: batch_images, self.z: batch_noise_images })
+          _, summary_str,grads = self.sess.run([d_optim, self.d_sum,self.d_grads],
+                                         feed_dict={self.inputs: batch_images, self.z: batch_noise_images})
           self.writer.add_summary(summary_str, counter)
+          self.writer.add_summary(grads, counter)
+          self.writer.flush()
+          # Update G network
+          _, summary_str,grads = self.sess.run([g_optim, self.g_sum,self.g_grads],
+                                         feed_dict={self.inputs: batch_images, self.z: batch_noise_images})
+          self.writer.add_summary(summary_str, counter)
+          self.writer.add_summary(grads, counter)
+          self.writer.flush()
 
-          # update refinement(generator)
-          _, summary_str = self.sess.run([g_optim, self.g_sum],
-                                          feed_dict={ self.z: batch_noise_images })
+          _, summary_str,grads = self.sess.run([g_optim, self.g_sum,self.g_grads],
+                                         feed_dict={self.inputs: batch_images, self.z: batch_noise_images})
           self.writer.add_summary(summary_str, counter)
+          self.writer.add_summary(grads, counter)
+          self.writer.flush()
+
+          _, summary_str,grads = self.sess.run([g_optim, self.g_sum,self.g_grads],
+                                         feed_dict={self.inputs: batch_images, self.z: batch_noise_images})
+          self.writer.add_summary(summary_str, counter)
+          self.writer.add_summary(grads, counter)
+          self.writer.flush()
 
           # Run g_optim twice to make sure that d_loss does not go to zero (different from paper)
-          _, summary_str = self.sess.run([g_optim, self.g_sum],
-                                          feed_dict={ self.z: batch_noise_images })
+          _, summary_str,grads = self.sess.run([g_optim, self.g_sum, self.g_grads],
+                                         feed_dict={self.inputs: batch_images, self.z: batch_noise_images})
           self.writer.add_summary(summary_str, counter)
+          self.writer.add_summary(grads, counter)
+          self.writer.flush()
 
-          errD_fake = self.d_loss_fake.eval({ self.z: batch_noise_images })
-          errD_real = self.d_loss_real.eval({ self.inputs: batch_images })
-          errG = self.g_loss.eval({self.z: batch_noise_images})
+          errD_fake = self.d_loss_fake.eval({ self.inputs: batch_images, self.z: batch_noise_images })
+          errD_real = self.d_loss_real.eval({ self.inputs: batch_images, self.z: batch_noise_images })
+          errG = self.g_loss.eval({self.inputs: batch_images, self.z: batch_noise_images})
 
         counter += 1
-
-        msg = "Epoch:[%2d][%4d/%4d]--> d_loss: %.8f, g_loss: %.8f" % (epoch, idx, batch_idxs, errD_fake+errD_real, errG)
+        # print(self.sess.run([self.D,self.D_],feed_dict={self.inputs: batch_images, self.z: batch_noise_images}))
+        msg = "Epoch:[%2d][%4d/%4d]--> Fake_d_loss: %.8f, Real_d_loss: %.8f, g_loss: %.8f" % (epoch, idx, batch_idxs, errD_fake, errD_real, errG)
         print(msg)
         logging.info(msg)
 
@@ -316,24 +356,65 @@ class ALOCC_Model(object):
                 },
               )
 
-              sample_test_out = self.sess.run(
-                [self.sampler],
-                feed_dict={
-                    self.z: sample_test
-                },
-              )
+              # sample_test_out = self.sess.run(
+              #   [self.sampler],
+              #   feed_dict={
+              #       self.z: sample_test
+              #   },
+              # )
               # export images
               scipy.misc.imsave('./{}/z_test_{:02d}_{:04d}.png'.format(config.sample_dir, epoch, idx),
                             montage(samples[:, :, :, 0]))
 
               # export images
-              scipy.misc.imsave('./{}/train_{:02d}_{:04d}.png'.format(config.sample_dir, epoch, idx),
-                                montage(samples[:, :, :, 0]))
+              # scipy.misc.imsave('./{}/train_{:02d}_{:04d}.png'.format(config.sample_dir, epoch, idx),
+              #                   montage(samples[:, :, :, 0]))
 
               msg = "[Sample] d_loss: %.8f, g_loss: %.8f" % (d_loss, g_loss)
               print(msg)
               logging.info(msg)
 
+      test_img = read_lst_images_w_noise2(["./dataset/UCSD_Anomaly_Dataset.v1p2/UCSDped2/Test/Test004/068.tif"], (45,45), (10,10))
+      test_img_orig = read_lst_images_without_noise2(["./dataset/UCSD_Anomaly_Dataset.v1p2/UCSDped2/Test/Test004/068.tif"], (45,45), (10,10))
+
+      test_patch,test_location = get_image_patches(test_img,(45,45), (10,10))
+      test_patch_orig,test_location_orig = get_image_patches(test_img_orig,(45,45), (10,10))
+
+      frame_test_patches = np.expand_dims(np.squeeze(test_patch),axis=-1)
+      frame_test_patches_orig = np.expand_dims(np.squeeze(test_patch_orig),axis=-1)
+
+      test_batch_idxs = len(frame_test_patches) // self.batch_size
+      print(len(frame_test_patches))
+      print('start new process ...')
+      lst_generated_img=[]
+      lst_discriminator_v=[]
+      for i in xrange(0, test_batch_idxs):
+          batch_data = frame_test_patches[i * self.batch_size:(i + 1) * self.batch_size]
+
+          results_g = self.sess.run(self.G, feed_dict={self.z: batch_data})
+          results_d = self.sess.run(self.D_, feed_dict={self.z: batch_data})
+        #results = self.sess.run(self.sampler, feed_dict={self.z: batch_data})
+        # to log some images with d values
+        #for idx,image in enumerate(results_g):
+        #  scipy.misc.imsave('samples/{}_{}.jpg'.format(idx,results_d[idx][0]),batch_data[idx,:,:,0])
+
+          lst_discriminator_v.extend(results_d)
+          lst_generated_img.extend(results_g)
+          print('finish pp ... {}/{}'.format(i,test_batch_idxs))
+    #f = plt.figure()
+    #plt.plot(np.array(lst_discriminator_v))
+    #f.savefig('samples/d_values.jpg')
+      print(np.squeeze(np.array(lst_discriminator_v)))
+      start = (test_batch_idxs-1)*self.batch_size
+      end = (test_batch_idxs)*self.batch_size
+      errD_fake = self.d_loss_fake.eval({ self.inputs: frame_test_patches_orig[start:end], self.z: frame_test_patches[start:end] })
+      errD_real = self.d_loss_real.eval({ self.inputs: frame_test_patches_orig[start:end], self.z: frame_test_patches[start:end] })
+      errG = self.g_loss.eval({self.inputs: frame_test_patches_orig[start:end], self.z: frame_test_patches[start:end]})
+      msg = "Fake_d_loss: %.8f, Real_d_loss: %.8f, g_loss: %.8f" % (errD_fake, errD_real, errG)
+      print(msg)
+
+      scipy.misc.imsave('./'+self.sample_dir+'/ALOCC_generated'+str(epoch)+'.jpg', montage(np.array(lst_generated_img)[:,:,:,0]))
+      scipy.misc.imsave('./'+self.sample_dir+'/ALOCC_input'+str(epoch)+'.jpg', montage(np.array(frame_test_patches)[:,:,:,0]))
       self.save(config.checkpoint_dir, epoch)
 
   # =========================================================================================================
@@ -475,6 +556,9 @@ class ALOCC_Model(object):
   # =========================================================================================================
 
   def f_check_checkpoint(self):
+      # self.saver = tf.train.Saver()
+      # self.saver.restore(self.sess, "./checkpoint/UCSD_96_45_45/ALOCC_Model.model-10")
+
     try:
       tf.global_variables_initializer().run()
     except:
@@ -531,7 +615,6 @@ class ALOCC_Model(object):
     #f = plt.figure()
     #plt.plot(np.array(lst_discriminator_v))
     #f.savefig('samples/d_values.jpg')
-
     scipy.misc.imsave('./'+self.sample_dir+'/ALOCC_generated.jpg', montage(np.array(lst_generated_img)[:,:,:,0]))
     scipy.misc.imsave('./'+self.sample_dir+'/ALOCC_input.jpg', montage(np.array(tmp_lst_slices)[:,:,:,0]))
     return lst_discriminator_v

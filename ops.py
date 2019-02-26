@@ -63,7 +63,7 @@ def conv2d(input_, output_dim, k_h=5, k_w=5, d_h=1, d_w=1, stddev=0.02, name="co
   '''
   with tf.variable_scope(name):
 
-    w = tf.get_variable('w', [k_h, k_w, input_.get_shape()[-1], output_dim],initializer=tf.truncated_normal_initializer(stddev=stddev))
+    w = tf.get_variable('w', [k_h, k_w, input_.get_shape()[-1], output_dim],initializer=tf.contrib.layers.xavier_initializer())
 
     conv = tf.nn.conv2d(input_, w, strides=[1, d_h, d_w, 1], padding=padding)
 
@@ -80,7 +80,7 @@ def deconv2d(input_, output_shape, k_h=5, k_w=5, d_h=1, d_w=1, stddev=0.02, name
   with tf.variable_scope(name):
 
     # filter : [height, width, output_channels, in_channels]
-    w = tf.get_variable('w', [k_h, k_w, output_shape[-1], input_.get_shape()[-1]],initializer=tf.random_normal_initializer(stddev=stddev))
+    w = tf.get_variable('w', [k_h, k_w, output_shape[-1], input_.get_shape()[-1]],initializer=tf.contrib.layers.xavier_initializer())
     if padding=='VALID':
         # input_ = tf.pad(input_,paddings = [[0,0], [4,4], [4,4], [0,0]], mode='SYMMETRIC', name = "pad")
         deconv = tf.nn.conv2d_transpose(input_, w, output_shape = output_shape, strides=[1, d_h, d_w, 1], padding = 'VALID')
@@ -100,7 +100,7 @@ def linear(input_, output_size, scope=None, stddev=0.02, bias_start=0.0, with_w=
 
   with tf.variable_scope(scope or "Linear"):
 
-    matrix = tf.get_variable("Matrix", [shape[1], output_size], tf.float32,tf.random_normal_initializer(stddev=stddev))
+    matrix = tf.get_variable("Matrix", [shape[1], output_size], tf.float32,tf.contrib.layers.xavier_initializer())
 
     bias = tf.get_variable("bias", [output_size],initializer=tf.constant_initializer(bias_start))
 

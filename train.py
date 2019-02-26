@@ -11,7 +11,7 @@ flags.DEFINE_float("beta1", 0.5, "Momentum term of adam [0.5]")
 flags.DEFINE_integer("attention_label", 1, "Conditioned label that growth attention of training label [1]")
 flags.DEFINE_float("r_alpha", 0.2, "Refinement parameter [0.2]")
 flags.DEFINE_float("train_size", np.inf, "The size of train images [np.inf]")
-flags.DEFINE_integer("batch_size",128, "The size of batch images [64]")
+flags.DEFINE_integer("batch_size",96, "The size of batch images [64]")
 flags.DEFINE_integer("input_height", 45, "The size of image to use. [45]")
 flags.DEFINE_integer("input_width", None, "The size of image to use. If None, same value as input_height [None]")
 flags.DEFINE_integer("output_height", 45, "The size of the output images to produce [45]")
@@ -82,7 +82,7 @@ def main(_):
     check_some_assertions()
 
     # manual handling of GPU
-    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.4)
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.9)
     run_config = tf.ConfigProto(gpu_options=gpu_options)
     run_config.gpu_options.allow_growth=True
 

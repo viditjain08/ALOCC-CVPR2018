@@ -98,7 +98,9 @@ def read_dataset_images(s_dataset_url , nd_img_size ,n_number_count):
     return np.array(lst_images)
 
 def read_image(s_image_path):
-    tmp_image = scipy.misc.imread(s_image_path)[100:240,0:360]/127.5 -1.
+    # tmp_image = scipy.misc.imread(s_image_path)[100:240,0:360]/127.5 -1.
+    tmp_image = scipy.misc.imread(s_image_path)[100:240,0:360]/255.
+
     #sigma = 0.155
     #noisy = random_noise(tmp_image, var=sigma ** 2)
     # image = scipy.misc.imresize(tmp_image, nd_img_size)
