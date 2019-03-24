@@ -134,14 +134,15 @@ class ALOCC_Model(object):
     self.z = tf.placeholder(tf.float32,[self.batch_size] + image_dims, name='z')
 
     # Generate the Images
-    self.G = self.generator(self.z)
+    self.G, self.G_ = self.generator(self.z)
 
+# Generator apply sigmoid
     # Use the Discriminator to discriminate for the generator's image and the input image
 
     self.D, self.D_logits = self.discriminator(inputs)
     self.D_, self.D_logits_ = self.discriminator(self.G, reuse=True)
 
-    self.sampler = self.generator(self.z,reuse=True)
+    self.sampler, self.sampler_ = self.generator(self.z,reuse=True)
 
     # Simple GAN's losses
     self.d_loss_real = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.D_logits, labels=tf.ones_like(self.D)))
@@ -151,10 +152,10 @@ class ALOCC_Model(object):
     self.g_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.D_logits_, labels=tf.ones_like(self.D_)))
 
     # Refinement loss
-    self.g_r_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.G,labels=inputs))
+    self.g_r_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=self.G_,labels=inputs))
 
     # Final Loss
-    self.g_loss  = self.g_loss + self.g_r_loss * self.r_alpha
+    self.g_loss  = self.g_loss + self.g_r_loss * self.r_alpha * 3
     self.d_loss = self.d_loss_real + self.d_loss_fake
 
     self.d_loss_real_sum = tf.summary.scalar("d_loss_real", self.d_loss_real)
@@ -171,11 +172,11 @@ class ALOCC_Model(object):
 # =========================================================================================================
   def train(self, config):
 
-    d_grads = tf.train.RMSPropOptimizer(config.learning_rate).compute_gradients(self.d_loss, var_list=self.d_vars)
-    g_grads = tf.train.RMSPropOptimizer(config.learning_rate).compute_gradients(self.g_loss, var_list=self.g_vars)
+    d_grads = tf.train.AdamOptimizer(config.learning_rate).compute_gradients(self.d_loss, var_list=self.d_vars)
+    g_grads = tf.train.AdamOptimizer(config.learning_rate).compute_gradients(self.g_loss, var_list=self.g_vars)
 
-    d_optim = tf.train.RMSPropOptimizer(config.learning_rate).apply_gradients(d_grads)
-    g_optim = tf.train.RMSPropOptimizer(config.learning_rate).apply_gradients(g_grads)
+    d_optim = tf.train.AdamOptimizer(config.learning_rate).apply_gradients(d_grads)
+    g_optim = tf.train.AdamOptimizer(config.learning_rate).apply_gradients(g_grads)
 
     d_grads_scalar = []
     g_grads_scalar = []
@@ -192,7 +193,7 @@ class ALOCC_Model(object):
 
     tf.global_variables_initializer().run()
 
-    self.saver = tf.train.Saver()
+    self.saver = tf.train.Saver(max_to_keep=40)
 
     self.g_sum = merge_summary([self.d_loss_fake_sum, self.g_loss_sum])
     self.d_sum = merge_summary([self.d_loss_real_sum, self.d_loss_sum])
@@ -263,7 +264,7 @@ class ALOCC_Model(object):
         batch_images = np.array(batch).astype(np.float32)
         batch_noise_images = np.array(batch_noise).astype(np.float32)
 
-        batch_z = np.random.uniform(-1, 1, [config.batch_size, self.z_dim]).astype(np.float32)
+        batch_z = np.random.uniform(0, 1, [config.batch_size, self.z_dim]).astype(np.float32)
 
         if config.dataset == 'mnist':
           # Update D network
@@ -290,37 +291,28 @@ class ALOCC_Model(object):
           errG = self.g_loss.eval({self.z: batch_noise_images})
         else:
           # update discriminator
-          _, summary_str,grads = self.sess.run([d_optim, self.d_sum,self.d_grads],
+          # if idx%2==0:
+          #     _ = self.sess.run([d_optim],
+          #                                  feed_dict={self.inputs: batch_images, self.z: batch_noise_images})
+          summary_str,grads = self.sess.run([self.d_sum,self.d_grads],
                                          feed_dict={self.inputs: batch_images, self.z: batch_noise_images})
           self.writer.add_summary(summary_str, counter)
           self.writer.add_summary(grads, counter)
           self.writer.flush()
+          # a,b = self.sess.run([self.D,self.D_],
+          #                                feed_dict={self.inputs: batch_images, self.z: batch_noise_images})
           # Update G network
-          _, summary_str,grads = self.sess.run([g_optim, self.g_sum,self.g_grads],
+          # _, summary_str,grads,c,d = self.sess.run([g_optim, self.g_sum,self.g_grads,self.D,self.D_],
+          #                                feed_dict={self.inputs: batch_images, self.z: batch_noise_images})
+          _, summary_str,grads,c,d = self.sess.run([g_optim, self.g_sum,self.g_grads,self.D,self.D_],
                                          feed_dict={self.inputs: batch_images, self.z: batch_noise_images})
+          # _, summary_str,grads,c,d = self.sess.run([g_optim, self.g_sum,self.g_grads,self.D,self.D_],
+          #                                feed_dict={self.inputs: batch_images, self.z: batch_noise_images})
           self.writer.add_summary(summary_str, counter)
           self.writer.add_summary(grads, counter)
           self.writer.flush()
-
-          _, summary_str,grads = self.sess.run([g_optim, self.g_sum,self.g_grads],
+          c,d = self.sess.run([self.D,self.D_],
                                          feed_dict={self.inputs: batch_images, self.z: batch_noise_images})
-          self.writer.add_summary(summary_str, counter)
-          self.writer.add_summary(grads, counter)
-          self.writer.flush()
-
-          _, summary_str,grads = self.sess.run([g_optim, self.g_sum,self.g_grads],
-                                         feed_dict={self.inputs: batch_images, self.z: batch_noise_images})
-          self.writer.add_summary(summary_str, counter)
-          self.writer.add_summary(grads, counter)
-          self.writer.flush()
-
-          # Run g_optim twice to make sure that d_loss does not go to zero (different from paper)
-          _, summary_str,grads = self.sess.run([g_optim, self.g_sum, self.g_grads],
-                                         feed_dict={self.inputs: batch_images, self.z: batch_noise_images})
-          self.writer.add_summary(summary_str, counter)
-          self.writer.add_summary(grads, counter)
-          self.writer.flush()
-
           errD_fake = self.d_loss_fake.eval({ self.inputs: batch_images, self.z: batch_noise_images })
           errD_real = self.d_loss_real.eval({ self.inputs: batch_images, self.z: batch_noise_images })
           errG = self.g_loss.eval({self.inputs: batch_images, self.z: batch_noise_images})
@@ -330,11 +322,14 @@ class ALOCC_Model(object):
         msg = "Epoch:[%2d][%4d/%4d]--> Fake_d_loss: %.8f, Real_d_loss: %.8f, g_loss: %.8f" % (epoch, idx, batch_idxs, errD_fake, errD_real, errG)
         print(msg)
         logging.info(msg)
+        msg = "D_real_prob: %.8f, D_fake_loss: %.8f, G_real_prob: %.8f, G_fake_loss: %.8f" % (np.mean(a),np.mean(b),np.mean(c),np.mean(d))
+        print(msg)
+        logging.info(msg)
 
         if np.mod(counter, self.n_per_itr_print_results) == 0:
           if config.dataset == 'mnist':
-            samples, d_loss, g_loss = self.sess.run(
-              [self.sampler, self.d_loss, self.g_loss],
+            samples, d_loss, g_loss, a = self.sess.run(
+              [self.sampler, self.d_loss, self.g_loss, self.D_],
               feed_dict={
                   self.z: sample_inputs,
                   self.inputs: sample_inputs
@@ -345,6 +340,8 @@ class ALOCC_Model(object):
             save_images(samples, [manifold_h, manifold_w],
                   './{}/train_{:02d}_{:04d}.png'.format(config.sample_dir, epoch, idx))
             print("[Sample] d_loss: %.8f, g_loss: %.8f" % (d_loss, g_loss))
+            msg = "Real Probability: %.8f" % (np.mean(a))
+            print(msg)
           # ====================================================================================================
           else:
             #try:
@@ -371,6 +368,9 @@ class ALOCC_Model(object):
               #                   montage(samples[:, :, :, 0]))
 
               msg = "[Sample] d_loss: %.8f, g_loss: %.8f" % (d_loss, g_loss)
+              print(msg)
+              logging.info(msg)
+              msg = "Real Probability: %.8f" % (np.mean(a))
               print(msg)
               logging.info(msg)
 
@@ -468,26 +468,26 @@ class ALOCC_Model(object):
 
       print(encoder_3)
       # Decoder-Architecture
-      decoder_3 = lrelu(deconv2d( encoder_3, output_shape = encoder_2.get_shape(), name = 'g_decoder_h3_deconv',padding='SAME'))
+      decoder_3 = lrelu(self.g_bn4(deconv2d( encoder_3, output_shape = encoder_2.get_shape(), name = 'g_decoder_h3_deconv',padding='SAME')))
       assert(decoder_3.get_shape()[-1] == 256)
       print(decoder_3)
 
-      decoder_2 = lrelu(deconv2d( decoder_3, output_shape = encoder_1.get_shape(), name = 'g_decoder_h2_deconv'))
+      decoder_2 = lrelu(self.g_bn5(deconv2d( decoder_3, output_shape = encoder_1.get_shape(), name = 'g_decoder_h2_deconv')))
       assert(decoder_2.get_shape()[-1] == 128)
       print(decoder_2)
 
-      decoder_1 = lrelu(deconv2d( decoder_2, output_shape = encoder_0.get_shape(), name = 'g_decoder_h1_deconv'))
+      decoder_1 = lrelu(self.g_bn6(deconv2d( decoder_2, output_shape = encoder_0.get_shape(), name = 'g_decoder_h1_deconv')))
       assert(decoder_1.get_shape()[-1] == 64)
       print(decoder_1)
 
-      decoder_0 = deconv2d( decoder_1, output_shape = z.get_shape(), name = 'g_decoder_h0_deconv')
+      decoder_0 = self.g_bn7(deconv2d( decoder_1, output_shape = z.get_shape(), name = 'g_decoder_h0_deconv'))
       assert(decoder_0.get_shape()[-1] == 1)
       print(decoder_0)
 
       # PLLLLLLLLLLLLLLLLLLLLLEASEEEEEEEEEEEEEEEEEEEEEEEEEEEEE CHECKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK
       # return tf.nn.tanh(decoder_0,name='g_output')
 
-      return decoder_0
+      return tf.nn.sigmoid(decoder_0), decoder_0
 
   # =========================================================================================================
   def sampler(self, z, y=None):
@@ -556,36 +556,36 @@ class ALOCC_Model(object):
   # =========================================================================================================
 
   def f_check_checkpoint(self):
-      # self.saver = tf.train.Saver()
-      # self.saver.restore(self.sess, "./checkpoint/UCSD_96_45_45/ALOCC_Model.model-10")
+      self.saver = tf.train.Saver()
+      self.saver.restore(self.sess, "./checkpoint_3/UCSD_128_45_45/ALOCC_Model.model-34")
 
-    try:
-      tf.global_variables_initializer().run()
-    except:
-      tf.initialize_all_variables().run()
-    print(" [*] Reading checkpoints...")
-    self.saver = tf.train.Saver()
-
-    ckpt = tf.train.get_checkpoint_state(self.checkpoint_dir)
-    if ckpt and ckpt.model_checkpoint_path:
-      ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
-      self.saver.restore(self.sess, os.path.join(self.checkpoint_dir, ckpt_name))
-      counter = int(next(re.finditer("(\d+)(?!.*\d)",ckpt_name)).group(0))
-      print(" [*] Success to read {}".format(ckpt_name))
-      could_load = True
-      checkpoint_counter = counter
-    else:
-      print(" [*] Failed to find a checkpoint")
-      could_load = False
-      checkpoint_counter =0
-
-    if could_load:
-      counter = checkpoint_counter
-      print(" [*] Load SUCCESS")
-      return counter
-    else:
-      print(" [!] Load failed...")
-      return -1
+    # try:
+    #   tf.global_variables_initializer().run()
+    # except:
+    #   tf.initialize_all_variables().run()
+    # print(" [*] Reading checkpoints...")
+    # self.saver = tf.train.Saver()
+    #
+    # ckpt = tf.train.get_checkpoint_state(self.checkpoint_dir)
+    # if ckpt and ckpt.model_checkpoint_path:
+    #   ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
+    #   self.saver.restore(self.sess, os.path.join(self.checkpoint_dir, ckpt_name))
+    #   counter = int(next(re.finditer("(\d+)(?!.*\d)",ckpt_name)).group(0))
+    #   print(" [*] Success to read {}".format(ckpt_name))
+    #   could_load = True
+    #   checkpoint_counter = counter
+    # else:
+    #   print(" [*] Failed to find a checkpoint")
+    #   could_load = False
+    #   checkpoint_counter =0
+    #
+    # if could_load:
+    #   counter = checkpoint_counter
+    #   print(" [*] Load SUCCESS")
+    #   return counter
+    # else:
+    #   print(" [!] Load failed...")
+    #   return -1
 
   # =========================================================================================================
   def f_test_frozen_model(self,lst_image_slices=[]):

@@ -103,6 +103,10 @@ ENV/
 checkpoint/
 checkpoint_backup/
 export/
+Pytorch.ipynb
+export1/
+export2/
+nonfall/
 dataset/
 log/
 montage.png
